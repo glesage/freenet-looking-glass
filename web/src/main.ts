@@ -115,7 +115,7 @@ const combo = attachCombobox(keyInput, {
     const listing = await getContractListing();
     return {
       entries: mergeComboEntries(listing.entries, listing.error),
-      error: listing.error ? "Node contract list unavailable" : undefined,
+      error: listing.error ? describeListingError(listing.error) : undefined,
     };
   },
   onPick: (keyId) => void inspect(keyId),
@@ -340,6 +340,18 @@ function mergeComboEntries(entries: ContractEntry[], listingError?: string): Key
     for (const keyId of inspections.keys()) add(keyId);
   }
   return out;
+}
+
+// The node blocks contract listing (NodeQueries) whenever Looking Glass is
+// served as a hosted contract web app — a deliberate topology-exfiltration
+// guard in freenet-core, so it can't be worked around from the app. Fetching a
+// known key still works, so point the user at that path instead of showing a
+// bare "unavailable".
+function describeListingError(raw: string): string {
+  if (/not available to contract web applications/i.test(raw)) {
+    return "Contract discovery is unavailable when Looking Glass runs as a hosted Freenet app. Paste a contract key to inspect it, or open a ?focus=<key> link.";
+  }
+  return "Node contract list unavailable";
 }
 
 function rememberSummary(keyId: string, root: unknown): string {

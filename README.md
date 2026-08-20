@@ -17,7 +17,7 @@ make update     # push updates to freenet
 
 ## Known limits
 
-The contract search functionality in Looking Glass uses some arbitrary attributes of contract state that are set for River, Delta and some other base apps, but they may not work for every app. When no discernible field is readable, the contract description in the search UI will simply be "Unknown"  
+The contract search functionality does NOT work in production, it only works as a dev-node running locally. Further, it uses some arbitrary attributes of contract state that are set for River, Delta and some other base apps, but they may not work for every app. When no discernible field is readable, the contract description in the search UI will simply be "Unknown"  
 
 <img width="472" height="248" alt="Screenshot 2026-08-21 at 12 00 30 am" src="https://github.com/user-attachments/assets/18dd2ce5-b341-4c70-bd02-bab12fa925d9" />  
 
