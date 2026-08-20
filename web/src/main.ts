@@ -2,8 +2,8 @@ import "./style.css";
 import { summaryFromDecoded } from "./contract-summary";
 import { NodeClient, type ContractEntry, type ContractListing, type UpdateEvent } from "./freenet";
 import { deepDecode, type DeepDecoded } from "./decoders";
-import { el, renderRoot, renderValue } from "./ui/render";
-import { formatBytes, renderTimeline, type TimelinePoint } from "./ui/timeline";
+import { el, renderRoot, renderRowsTable } from "./ui/render";
+import { formatBytes } from "./ui/format-bytes";
 import { attachCombobox, type KeyComboEntry } from "./ui/combobox";
 import { loadJson, saveJson, storageIsPersistent } from "./storage";
 import { sha256Hex } from "./sha256";
@@ -15,12 +15,14 @@ interface Inspection {
   sha: string;
   fetchedAt: number;
   subscribed: boolean;
+  subscribePending: boolean;
   deep: DeepDecoded | null;
   updates: UpdateEvent[];
   error?: string;
 }
 
 const MAX_UPDATES_KEPT = 200;
+const SUBSCRIBE_TIMEOUT_MS = 30_000;
 const WATCHLIST_KEY = "looking-glass.watchlist.v2";
 const WATCHLIST_KEY_V1 = "looking-glass.watchlist.v1";
 const SUMMARY_CACHE_KEY = "looking-glass.combo-summaries.v1";
@@ -116,6 +118,8 @@ const combo = attachCombobox(keyInput, {
 });
 
 let pendingBootKey: string | null = readInspectedKey();
+let connectedBefore = false;
+const subscribeTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
 client.onStatus((s, detail) => {
   connStatus = s;
@@ -128,7 +132,28 @@ client.onStatus((s, detail) => {
       pendingBootKey = null;
       void inspect(key);
     }
+    if (connectedBefore) {
+      for (const insp of inspections.values()) {
+        if (insp.subscribed) void beginSubscribe(insp);
+      }
+    }
+    connectedBefore = true;
   }
+});
+
+client.onSubscribeResult((keyId, ok) => {
+  clearSubscribeTimeout(keyId);
+  const insp = inspections.get(keyId);
+  if (!insp?.subscribePending) return;
+  insp.subscribePending = false;
+  if (ok) {
+    insp.subscribed = true;
+    insp.error = undefined;
+  } else {
+    insp.subscribed = false;
+    insp.error = "node refused subscription";
+  }
+  if (keyId === currentKey) renderPanel();
 });
 
 client.onUpdate((update) => {
@@ -165,6 +190,7 @@ async function inspect(keyId: string): Promise<void> {
       sha: "",
       fetchedAt: 0,
       subscribed: false,
+      subscribePending: false,
       deep: null,
       updates: [],
     };
@@ -188,18 +214,53 @@ async function inspect(keyId: string): Promise<void> {
 }
 
 async function toggleWatch(insp: Inspection): Promise<void> {
-  if (insp.subscribed) {
+  if (insp.subscribed || insp.subscribePending) {
+    clearSubscribeTimeout(insp.keyId);
     insp.subscribed = false;
+    insp.subscribePending = false;
     renderPanel();
     return;
   }
-  try {
-    await client.subscribe(insp.keyId);
-    insp.subscribed = true;
-  } catch (e) {
-    insp.error = `watch failed: ${e instanceof Error ? e.message : String(e)}`;
+  await beginSubscribe(insp);
+}
+
+function clearSubscribeTimeout(keyId: string): void {
+  const t = subscribeTimeouts.get(keyId);
+  if (t !== undefined) {
+    clearTimeout(t);
+    subscribeTimeouts.delete(keyId);
   }
+}
+
+async function beginSubscribe(insp: Inspection): Promise<void> {
+  insp.subscribePending = true;
+  insp.subscribed = false;
+  insp.error = undefined;
   renderPanel();
+  clearSubscribeTimeout(insp.keyId);
+  subscribeTimeouts.set(
+    insp.keyId,
+    setTimeout(() => {
+      subscribeTimeouts.delete(insp.keyId);
+      if (!insp.subscribePending) return;
+      insp.subscribePending = false;
+      insp.error = "subscription timed out waiting for node confirmation";
+      if (insp.keyId === currentKey) renderPanel();
+    }, SUBSCRIBE_TIMEOUT_MS),
+  );
+  try {
+    const bytes = await client.subscribe(insp.keyId);
+    insp.bytes = bytes;
+    insp.sha = sha256Hex(bytes);
+    insp.fetchedAt = Date.now();
+    insp.deep = deepDecode(bytes);
+    if (insp.keyId === currentKey) renderPanel();
+  } catch (e) {
+    clearSubscribeTimeout(insp.keyId);
+    insp.subscribePending = false;
+    insp.error = `watch failed: ${e instanceof Error ? e.message : String(e)}`;
+    renderPanel();
+  }
 }
 
 function togglePin(keyId: string): void {
@@ -398,17 +459,11 @@ function renderPanel(): void {
   const watchBtn = el(
     "button",
     insp.subscribed ? "subscribed" : undefined,
-    insp.subscribed ? "Watching" : "Watch",
+    insp.subscribePending ? "Subscribing…" : insp.subscribed ? "Watching" : "Watch",
   );
   watchBtn.addEventListener("click", () => void toggleWatch(insp));
   activityHead.appendChild(watchBtn);
   activity.appendChild(activityHead);
-  const points: TimelinePoint[] = insp.updates.map((u) => ({
-    t: u.receivedAt,
-    size: u.bytes.length,
-    kind: u.kind,
-  }));
-  activity.appendChild(renderTimeline(points));
 
   if (insp.updates.length > 0) {
     const rows = insp.updates
@@ -420,7 +475,7 @@ function renderPanel(): void {
         size: formatBytes(u.bytes.length),
         sha256: `${sha256Hex(u.bytes).slice(0, 16)}…`,
       }));
-    activity.appendChild(renderValue(rows) as HTMLElement);
+    activity.appendChild(renderRowsTable(rows, ["time", "kind", "size", "sha256"]));
   }
   panel.appendChild(activity);
 }

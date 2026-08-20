@@ -108,7 +108,7 @@ test("inspects a contract from the local node end to end", async ({ page }) => {
   await expect(page.locator(".watchlist li")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Watch" }).click();
-  await expect(page.getByRole("button", { name: "Watching" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Watching" })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Watching" }).click();
   await expect(page.getByRole("button", { name: "Watch" })).toBeVisible();
 

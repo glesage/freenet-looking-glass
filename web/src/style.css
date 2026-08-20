@@ -549,28 +549,6 @@ button.subscribed {
   margin: 0;
 }
 
-.timeline {
-  width: 100%;
-  height: auto;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.bar-state {
-  fill: var(--accent-primary);
-}
-
-.bar-delta {
-  fill: var(--success);
-}
-
-.timeline-empty {
-  fill: var(--text-muted);
-  font-size: 12px;
-  font-family: var(--font-sans);
-}
-
 @media (max-width: 768px) {
   header {
     padding: 0.5rem 0;

@@ -7,7 +7,6 @@ import {
   ContractKey,
   FreenetWsApi,
   GetRequest,
-  SubscribeRequest,
   UpdateDataType,
   type GetResponse,
   type HostError,
@@ -56,6 +55,7 @@ export class NodeClient {
   private api: FreenetWsApi | null = null;
   private statusCbs: Array<(s: ConnStatus, detail?: string) => void> = [];
   private updateCbs: Array<(u: UpdateEvent) => void> = [];
+  private subscribeResultCbs: Array<(keyId: string, ok: boolean) => void> = [];
   private status: ConnStatus = "disconnected";
 
   connect(): void {
@@ -85,6 +85,10 @@ export class NodeClient {
         const ev = notificationToEvent(n);
         if (ev) for (const cb of this.updateCbs) cb(ev);
       },
+      onSubscribeResponse: (key, subscribed) => {
+        const keyId = key.encode();
+        for (const cb of this.subscribeResultCbs) cb(keyId, subscribed);
+      },
     };
 
     try {
@@ -101,10 +105,14 @@ export class NodeClient {
     return Uint8Array.from(response.state ?? []);
   }
 
-  async subscribe(keyId: string): Promise<void> {
+  async subscribe(keyId: string): Promise<Uint8Array> {
     const api = this.requireApi();
     const key = ContractKey.fromInstanceId(keyId);
-    await api.subscribe(new SubscribeRequest(key, []));
+    // Standalone SubscribeRequest is fire-and-forget in stdlib and the node
+    // often never answers with SubscribeResponse; fetch+subscribe is reliable.
+    const response: GetResponse = await api.get(new GetRequest(key, false, true));
+    for (const cb of this.subscribeResultCbs) cb(keyId, true);
+    return Uint8Array.from(response.state ?? []);
   }
 
   async listContracts(): Promise<ContractListing> {
@@ -128,6 +136,10 @@ export class NodeClient {
     this.updateCbs.push(cb);
   }
 
+  onSubscribeResult(cb: (keyId: string, ok: boolean) => void): void {
+    this.subscribeResultCbs.push(cb);
+  }
+
   private requireApi(): FreenetWsApi {
     if (!this.api || this.status !== "connected") {
       throw new Error("not connected to a Freenet node");
@@ -141,16 +153,22 @@ export class NodeClient {
   }
 }
 
-function notificationToEvent(n: UpdateNotification): UpdateEvent | null {
+export function notificationToEvent(n: UpdateNotification): UpdateEvent | null {
   const keyId = n.key?.encode?.() ?? "";
-  if (!keyId) return null;
-  const update = n.update;
-  const dataType = update?.updateDataType;
-  const data = update?.updateData as
+  const dataType = n.update?.updateDataType ?? UpdateDataType.NONE;
+  const data = n.update?.updateData as
     | { state?: number[]; delta?: number[] }
     | null
     | undefined;
-  if (!data) return null;
+
+  if (!keyId) {
+    console.warn("[looking-glass] dropped update notification: missing key", { dataType });
+    return null;
+  }
+  if (!data) {
+    console.warn("[looking-glass] dropped update notification:", keyId, { dataType, reason: "no updateData" });
+    return null;
+  }
 
   let kind: UpdateEvent["kind"];
   let bytes: Uint8Array;
@@ -163,7 +181,11 @@ function notificationToEvent(n: UpdateNotification): UpdateEvent | null {
   } else if (dataType === UpdateDataType.StateAndDeltaUpdate && data.state) {
     kind = "state+delta";
     bytes = Uint8Array.from(data.state);
+  } else if (dataType === UpdateDataType.StateAndDeltaUpdate && data.delta) {
+    kind = "delta";
+    bytes = Uint8Array.from(data.delta);
   } else {
+    console.warn("[looking-glass] dropped update notification:", keyId, { dataType });
     return null;
   }
   return { keyId, kind, bytes, receivedAt: Date.now() };
