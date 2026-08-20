@@ -110,6 +110,28 @@ function tryQueryResponseTag(bytes: Uint8Array): number | null {
   return r.u32();
 }
 
+// An Err response starts with Result tag 1 (not 0=Ok). The node returns one,
+// rather than NodeDiagnostics, whenever the query is rejected — most importantly
+// when Looking Glass runs as a hosted contract web app: the node blocks
+// NodeQueries from contracts to stop them exfiltrating peer topology, replying
+// "NodeQueries is not available to contract web applications". Without this the
+// caller ignored the Err and waited out the full 5s timeout. Layout for
+// ErrorKind::Unhandled: u32 result tag (1), u32 ErrorKind variant, then a
+// length-prefixed cause string; parsed defensively with a generic fallback.
+export function tryParseErrorMessage(bytes: Uint8Array): string | null {
+  if (bytes.length < 4) return null;
+  const r = new BincodeReader(bytes);
+  if (r.u32() === RESULT_OK) return null;
+  try {
+    r.u32();
+    const msg = r.string();
+    if (msg) return msg;
+  } catch {
+    /* unrecognized error layout — fall back to generic message */
+  }
+  return "node returned an error response";
+}
+
 function readSubscriptionEntries(r: BincodeReader): string[] {
   const count = r.u64();
   const keys: string[] = [];
@@ -264,6 +286,8 @@ export async function queryNodeContracts(wsUrl: string): Promise<NodeContractLis
       const bytes = await waitMessage(ws, remaining);
       const tag = tryQueryResponseTag(bytes);
       if (tag === QUERY_NODE_DIAGNOSTICS) return parseNodeDiagnostics(bytes);
+      const errMsg = tryParseErrorMessage(bytes);
+      if (errMsg) throw new Error(errMsg);
     }
   } finally {
     try {
