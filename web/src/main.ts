@@ -1,6 +1,6 @@
 import "./style.css";
 import { summaryFromDecoded } from "./contract-summary";
-import { NodeClient, type ContractEntry, type UpdateEvent } from "./freenet";
+import { NodeClient, type ContractEntry, type ContractListing, type UpdateEvent } from "./freenet";
 import { deepDecode, type DeepDecoded } from "./decoders";
 import { el, renderRoot, renderValue } from "./ui/render";
 import { formatBytes, renderTimeline, type TimelinePoint } from "./ui/timeline";
@@ -37,8 +37,7 @@ let watchlist: WatchlistEntry[] = loadWatchlist();
 let currentKey: string | null = null;
 let connStatus = "connecting";
 let connDetail = "";
-let contractCache: { at: number; listing: Awaited<ReturnType<typeof client.listContracts>> } | null =
-  null;
+let contractCache: { at: number; listing: ContractListing } | null = null;
 let summaryCache: Record<string, string> = loadJson<Record<string, string>>(SUMMARY_CACHE_KEY, {});
 let summaryPrefetchRunning = false;
 
@@ -239,11 +238,7 @@ function suggestWatchlistName(keyId: string): string {
   return shortKey(keyId);
 }
 
-function watchlistLabel(entry: WatchlistEntry): string {
-  return entry.name;
-}
-
-async function getContractListing(): Promise<Awaited<ReturnType<typeof client.listContracts>>> {
+async function getContractListing(): Promise<ContractListing> {
   const now = Date.now();
   if (contractCache && now - contractCache.at < CONTRACT_CACHE_TTL_MS) {
     return contractCache.listing;
@@ -355,7 +350,7 @@ function renderSidebar(): void {
     const list = el("ul", "watchlist");
     for (const entry of watchlist) {
       const item = el("li");
-      const btn = el("button", "link-btn", watchlistLabel(entry));
+      const btn = el("button", "link-btn", entry.name);
       btn.title = entry.keyId;
       btn.addEventListener("click", () => void inspect(entry.keyId));
       const meta = inspections.get(entry.keyId);
@@ -431,9 +426,8 @@ function renderPanel(): void {
 }
 
 function renderState(insp: Inspection): HTMLElement {
-  const bytes = insp.bytes!;
   const box = el("div", "state-view");
-  const deep = insp.deep ?? deepDecode(bytes);
+  const deep = insp.deep!;
 
   box.appendChild(renderRoot(deep.value));
 

@@ -7,8 +7,6 @@ export type KeyComboEntry = {
   summary?: string;
 };
 
-export type ComboEntry = KeyComboEntry | { kind: "loading" } | { kind: "error"; message: string };
-
 export interface ComboboxOptions {
   getEntries: () => Promise<{ entries: KeyComboEntry[]; error?: string }>;
   onPick: (keyId: string) => void;
@@ -182,8 +180,7 @@ export function attachCombobox(input: HTMLInputElement, options: ComboboxOptions
 
     highlight = Math.min(highlight, filteredList.length - 1);
 
-    const errorOffset = lastErrorHeight;
-    const effectiveScrollTop = Math.max(0, savedScrollTop - errorOffset);
+    const effectiveScrollTop = Math.max(0, savedScrollTop - lastErrorHeight);
     const win = computeWindow(
       filteredList.length,
       effectiveScrollTop,
@@ -255,12 +252,11 @@ export function attachCombobox(input: HTMLInputElement, options: ComboboxOptions
     if (list.length === 0) return;
     highlight = ((index % list.length) + list.length) % list.length;
 
-    const errorOffset = lastErrorHeight;
-    const effectiveScrollTop = Math.max(0, panel.scrollTop - errorOffset);
+    const effectiveScrollTop = Math.max(0, panel.scrollTop - lastErrorHeight);
     if (highlight * ROW_PX < effectiveScrollTop) {
-      panel.scrollTop = errorOffset + highlight * ROW_PX;
+      panel.scrollTop = lastErrorHeight + highlight * ROW_PX;
     } else if ((highlight + 1) * ROW_PX > effectiveScrollTop + panel.clientHeight) {
-      panel.scrollTop = errorOffset + (highlight + 1) * ROW_PX - panel.clientHeight;
+      panel.scrollTop = lastErrorHeight + (highlight + 1) * ROW_PX - panel.clientHeight;
     }
 
     render();

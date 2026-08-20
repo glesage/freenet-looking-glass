@@ -28,7 +28,7 @@ export interface UpdateEvent {
 export type ContractEntry = { keyId: string; badge?: "subscribed" };
 export type ContractListing = { entries: ContractEntry[]; error?: string };
 
-export function buildContractListing(subscribed: string[], hosted: string[]): ContractEntry[] {
+function buildContractListing(subscribed: string[], hosted: string[]): ContractEntry[] {
   const seen = new Set<string>();
   const entries: ContractEntry[] = [];
   for (const keyId of subscribed) {
@@ -44,12 +44,12 @@ export function buildContractListing(subscribed: string[], hosted: string[]): Co
   return entries;
 }
 
-function nodeEndpoints(): { nodeHost: string; wsProto: string; wsBase: string; nativeWsUrl: string } {
+function nodeEndpoints(): { wsBase: string; nativeWsUrl: string } {
   const params = new URLSearchParams(location.search);
   const nodeHost = params.get("node") ?? location.host;
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
   const wsBase = `${wsProto}//${nodeHost}/v1/contract/command`;
-  return { nodeHost, wsProto, wsBase, nativeWsUrl: `${wsBase}?encodingProtocol=native` };
+  return { wsBase, nativeWsUrl: `${wsBase}?encodingProtocol=native` };
 }
 
 export class NodeClient {

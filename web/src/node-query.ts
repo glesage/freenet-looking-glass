@@ -3,64 +3,34 @@
  *
  * URL: ws(s)://<host>/v1/contract/command?encodingProtocol=native
  *
- * ClientRequest variants (u32 LE): DelegateOp=0, ContractOp=1,
- * Disconnect { cause: Option<String> }=2, Authenticate=3, NodeQueries=4,
- * Close=5, StreamChunk=6
- *
- * NodeQuery variants (u32 LE): ConnectedPeers=0, SubscriptionInfo=1,
- * NodeDiagnostics { config }=2, NeighborHostingInfo=3
- *
- * Requests:
- *   NodeQueries(SubscriptionInfo)    = 04 00 00 00  01 00 00 00
- *   NodeQueries(NeighborHostingInfo) = 04 00 00 00  03 00 00 00
- *     — accepted by the node but NOT IMPLEMENTED (returns no response;
- *       freenet-core client_events.rs "not yet implemented"). Do not wait
- *       for it.
- *   NodeQueries(NodeDiagnostics) with include_subscriptions=true and
- *     empty contract_keys (all hosted) + other flags false:
- *       04 00 00 00  02 00 00 00  00 00 01  00×8  00 00 00
- *   Disconnect { cause: None }       = 02 00 00 00  00
+ * Request: NodeQueries(NodeDiagnostics) with include_subscriptions=true and
+ * empty contract_keys (all hosted) + other flags false:
+ *   04 00 00 00  02 00 00 00  00 00 01  00×8  00 00 00
+ * Disconnect { cause: None } = 02 00 00 00  00
  *
  * Response: Ok prefix 00 00 00 00 + HostResponse::QueryResponse 02 00 00 00 +
- * QueryResponse variant (ConnectedPeers=0, NetworkDebug=1, NodeDiagnostics=2,
- * NeighborHosting=3), then payload:
- *
- * NetworkDebug (SubscriptionInfo answer):
- *   subscriptions: Vec<SubscriptionInfo> — u64 count, each entry 32-byte
- *   ContractInstanceId + u64 client_id. Trailing connected_peers ignored.
- *
- * NodeDiagnostics (empty-keys answer = every hosting contract):
+ * QueryResponse::NodeDiagnostics (2), then:
  *   Option<NodeInfo>, Option<NetworkInfo>,
- *   subscriptions: Vec<SubscriptionInfo> (same layout as NetworkDebug),
- *   contract_states: HashMap<String, ContractState> — u64 count, then per
- *     entry base58 key String + subscribers u32 + Vec<String> peer ids +
- *     size_bytes u64. Remaining Option/Vec fields ignored.
+ *   subscriptions: Vec<SubscriptionInfo> — u64 count, each 32-byte id + u64 client_id,
+ *   contract_states: HashMap — u64 count, base58 key + ContractState (subscribers u32,
+ *   peer ids Vec<String>, size_bytes u64; remaining fields skipped).
  *
- * NeighborHosting (unimplemented on current nodes):
- *   my_hosted: Vec<ContractHostingEntry> — u64 count, each entry base58
- *   contract_key String + u32 hosting_hash + u64 hosted_since.
+ * SubscriptionInfo and NeighborHostingInfo query variants exist on the wire but are
+ * unused/unimplemented on current nodes — not sent by this client.
  *
  * Layout is version-pinned to the node's native protocol — not covered by any
  * compatibility guarantee. Parsers validate every tag strictly.
  */
 
-export const REQ_SUBSCRIPTION_INFO = new Uint8Array([
-  0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-]);
-export const REQ_NEIGHBOR_HOSTING = new Uint8Array([
-  0x04, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
-]);
-export const REQ_NODE_DIAGNOSTICS = new Uint8Array([
+const REQ_NODE_DIAGNOSTICS = new Uint8Array([
   0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]);
-export const REQ_DISCONNECT = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00]);
+const REQ_DISCONNECT = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00]);
 
-export const RESULT_OK = 0;
-export const HOST_QUERY_RESPONSE = 2;
-export const QUERY_NETWORK_DEBUG = 1;
-export const QUERY_NODE_DIAGNOSTICS = 2;
-export const QUERY_NEIGHBOR_HOSTING = 3;
+const RESULT_OK = 0;
+const HOST_QUERY_RESPONSE = 2;
+const QUERY_NODE_DIAGNOSTICS = 2;
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -69,7 +39,7 @@ export interface NodeContractList {
   hosted: string[];
 }
 
-export class BincodeReader {
+class BincodeReader {
   private offset = 0;
 
   constructor(private readonly buf: Uint8Array) {}
@@ -124,7 +94,7 @@ export class BincodeReader {
   }
 }
 
-export function expectU32(reader: BincodeReader, expected: number, label?: string): void {
+function expectU32(reader: BincodeReader, expected: number, label?: string): void {
   const actual = reader.u32();
   if (actual !== expected) {
     const where = label ? ` (${label})` : "";
@@ -132,44 +102,12 @@ export function expectU32(reader: BincodeReader, expected: number, label?: strin
   }
 }
 
-export function tryQueryResponseTag(bytes: Uint8Array): number | null {
+function tryQueryResponseTag(bytes: Uint8Array): number | null {
   if (bytes.length < 12) return null;
   const r = new BincodeReader(bytes);
   if (r.u32() !== RESULT_OK) return null;
   if (r.u32() !== HOST_QUERY_RESPONSE) return null;
   return r.u32();
-}
-
-export function parseNetworkDebug(bytes: Uint8Array): string[] {
-  const r = new BincodeReader(bytes);
-  expectU32(r, RESULT_OK, "result");
-  expectU32(r, HOST_QUERY_RESPONSE, "host response");
-  expectU32(r, QUERY_NETWORK_DEBUG, "query variant");
-
-  const count = r.u64();
-  const keys: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const id = r.bytes(32);
-    r.u64();
-    keys.push(base58Encode(id));
-  }
-  return keys;
-}
-
-export function parseNeighborHosting(bytes: Uint8Array): string[] {
-  const r = new BincodeReader(bytes);
-  expectU32(r, RESULT_OK, "result");
-  expectU32(r, HOST_QUERY_RESPONSE, "host response");
-  expectU32(r, QUERY_NEIGHBOR_HOSTING, "query variant");
-
-  const count = r.u64();
-  const keys: string[] = [];
-  for (let i = 0; i < count; i++) {
-    keys.push(r.string());
-    r.u32();
-    r.u64();
-  }
-  return keys;
 }
 
 function readSubscriptionEntries(r: BincodeReader): string[] {
@@ -211,7 +149,7 @@ function skipContractState(r: BincodeReader): void {
   r.u64();
 }
 
-export function parseNodeDiagnostics(bytes: Uint8Array): NodeContractList {
+function parseNodeDiagnostics(bytes: Uint8Array): NodeContractList {
   const r = new BincodeReader(bytes);
   expectU32(r, RESULT_OK, "result");
   expectU32(r, HOST_QUERY_RESPONSE, "host response");
@@ -231,7 +169,7 @@ export function parseNodeDiagnostics(bytes: Uint8Array): NodeContractList {
   return { subscribed, hosted };
 }
 
-export function base58Encode(bytes: Uint8Array): string {
+function base58Encode(bytes: Uint8Array): string {
   let zeros = 0;
   while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
 
@@ -252,33 +190,6 @@ export function base58Encode(bytes: Uint8Array): string {
   let out = "";
   for (let i = 0; i < zeros; i++) out += BASE58_ALPHABET[0];
   for (let i = digits.length - 1; i >= 0; i--) out += BASE58_ALPHABET[digits[i]];
-  return out;
-}
-
-export function base58Decode(encoded: string): Uint8Array {
-  if (encoded.length === 0) return new Uint8Array(0);
-
-  let zeros = 0;
-  while (zeros < encoded.length && encoded[zeros] === BASE58_ALPHABET[0]) zeros++;
-
-  const bytes: number[] = [0];
-  for (let i = zeros; i < encoded.length; i++) {
-    const value = BASE58_ALPHABET.indexOf(encoded[i]);
-    if (value < 0) throw new Error("invalid base58 character");
-    let carry = value;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-
-  const out = new Uint8Array(zeros + bytes.length);
-  for (let i = 0; i < bytes.length; i++) out[out.length - 1 - i] = bytes[i];
   return out;
 }
 

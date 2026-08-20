@@ -42,7 +42,6 @@ test("inspects a contract from the local node end to end", async ({ page }) => {
   await keyInput.focus();
   const listbox = page.getByRole("listbox");
   await expect(listbox).toBeVisible();
-  await expect(listbox.locator(".combo-more")).toHaveCount(0);
   await expect(listbox.locator(".combo-error")).toHaveCount(0);
   await expect(listbox.locator(".combo-summary").first()).toBeVisible();
 

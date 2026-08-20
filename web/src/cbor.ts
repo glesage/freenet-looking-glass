@@ -214,25 +214,3 @@ export function toHex(bytes: Uint8Array, max = Infinity): string {
   if (bytes.length > max) out += "…";
   return out;
 }
-
-export function hexDump(bytes: Uint8Array, maxBytes = 4096): string {
-  const n = Math.min(bytes.length, maxBytes);
-  const lines: string[] = [];
-  for (let off = 0; off < n; off += 16) {
-    const row = bytes.subarray(off, Math.min(off + 16, n));
-    const hex = [...row].map((b) => b.toString(16).padStart(2, "0"));
-    while (hex.length < 16) hex.push("  ");
-    const ascii = [...row]
-      .map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "."))
-      .join("");
-    lines.push(
-      `${off.toString(16).padStart(8, "0")}  ${hex.slice(0, 8).join(" ")}  ${hex
-        .slice(8)
-        .join(" ")}  |${ascii}|`,
-    );
-  }
-  if (bytes.length > maxBytes) {
-    lines.push(`… ${bytes.length - maxBytes} more bytes (${bytes.length} total)`);
-  }
-  return lines.join("\n");
-}

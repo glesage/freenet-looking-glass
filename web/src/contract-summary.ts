@@ -1,4 +1,4 @@
-import { DecodedBytes } from "./decoders";
+import { DecodedBytes, isByteIntArray } from "./decoders";
 
 const MAX_SUMMARY_LEN = 120;
 
@@ -21,7 +21,7 @@ export function summaryFromDecoded(root: unknown): string {
   return "unknown";
 }
 
-export function valueAt(root: unknown, path: string[]): unknown {
+function valueAt(root: unknown, path: string[]): unknown {
   let cur: unknown = root;
   for (const key of path) {
     cur = unwrap(cur);
@@ -36,7 +36,7 @@ function unwrap(value: unknown): unknown {
   return value;
 }
 
-export function asDisplayString(value: unknown): string | null {
+function asDisplayString(value: unknown): string | null {
   const v = unwrap(value);
   if (typeof v === "string") {
     const trimmed = v.trim();
@@ -50,7 +50,7 @@ export function asDisplayString(value: unknown): string | null {
       return null;
     }
   }
-  if (Array.isArray(v) && v.every((b) => typeof b === "number" && b >= 0 && b <= 255)) {
+  if (Array.isArray(v) && isByteIntArray(v)) {
     return asDisplayString(Uint8Array.from(v as number[]));
   }
   return null;

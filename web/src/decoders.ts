@@ -5,8 +5,6 @@
 import { cborDecode, MAX_DEPTH } from "./cbor";
 import { sha256Hex } from "./sha256";
 
-export { cborDecode, cborKeyString, hexDump, MAX_DEPTH, toHex } from "./cbor";
-
 export type RootDecodeKind = "webcontainer" | "json" | "cbor" | "text" | "binary";
 
 export class DecodedBytes {
@@ -19,7 +17,6 @@ export class DecodedBytes {
 
 export interface DeepDecoded {
   value: unknown;
-  trace: string;
   rootKind: RootDecodeKind;
 }
 
@@ -29,32 +26,43 @@ const NODE_BUDGET = 50_000;
 const MAX_BYTE_DECODE_SIZE = 128 * 1024;
 const MAX_CONTAINER_META = 1 << 20;
 
-const ROOT_TRACE_LABELS: Record<RootDecodeKind, string> = {
-  webcontainer: "web container",
-  json: "json",
-  cbor: "cbor",
-  text: "text",
-  binary: "binary",
-};
-
 export function deepDecode(bytes: Uint8Array): DeepDecoded {
-  const ctx: DecodeContext = { nodesVisited: 0, bytesDecodedCount: 0 };
+  const ctx: DecodeContext = { nodesVisited: 0 };
   const { kind, value } = decodeRoot(bytes);
   const decoded = deepDecodeValue(value, 0, ctx);
-  const trace = buildTrace(kind, ctx.bytesDecodedCount);
-  return { value: decoded, trace, rootKind: kind };
+  return { value: decoded, rootKind: kind };
 }
 
 interface DecodeContext {
   nodesVisited: number;
-  bytesDecodedCount: number;
 }
 
-function buildTrace(rootKind: RootDecodeKind, nestedCount: number): string {
-  const label = ROOT_TRACE_LABELS[rootKind];
-  if (nestedCount === 0) return label;
-  const plural = nestedCount === 1 ? "field" : "fields";
-  return `${label} · ${nestedCount} nested byte ${plural} decoded`;
+function tryParseJson(bytes: Uint8Array): unknown | undefined {
+  try {
+    if (bytes.length === 0) return undefined;
+    const text = utf8Strict.decode(bytes);
+    const first = text.trimStart()[0];
+    if (!first || !'{["-0123456789tfn'.includes(first)) return undefined;
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function tryDecodePrintableText(bytes: Uint8Array): string | null {
+  try {
+    if (bytes.length === 0) return null;
+    const text = utf8Strict.decode(bytes);
+    let printable = 0;
+    for (const ch of text) {
+      const c = ch.codePointAt(0)!;
+      if (c >= 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) printable++;
+    }
+    if (printable / [...text].length < 0.9) return null;
+    return text;
+  } catch {
+    return null;
+  }
 }
 
 function decodeRoot(bytes: Uint8Array): { kind: RootDecodeKind; value: unknown } {
@@ -62,29 +70,15 @@ function decodeRoot(bytes: Uint8Array): { kind: RootDecodeKind; value: unknown }
     return { kind: "webcontainer", value: decodeWebContainer(bytes) };
   } catch { /* fall through */ }
 
-  try {
-    if (bytes.length === 0) throw new Error("empty");
-    const text = utf8Strict.decode(bytes);
-    const first = text.trimStart()[0];
-    if (!first || !'{["-0123456789tfn'.includes(first)) throw new Error("not JSON-shaped");
-    return { kind: "json", value: JSON.parse(text) };
-  } catch { /* fall through */ }
+  const json = tryParseJson(bytes);
+  if (json !== undefined) return { kind: "json", value: json };
 
   try {
     return { kind: "cbor", value: cborDecode(bytes) };
   } catch { /* fall through */ }
 
-  try {
-    if (bytes.length === 0) throw new Error("empty");
-    const text = utf8Strict.decode(bytes);
-    let printable = 0;
-    for (const ch of text) {
-      const c = ch.codePointAt(0)!;
-      if (c >= 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) printable++;
-    }
-    if (printable / [...text].length < 0.9) throw new Error("mostly non-printable");
-    return { kind: "text", value: text };
-  } catch { /* fall through */ }
+  const text = tryDecodePrintableText(bytes);
+  if (text !== null) return { kind: "text", value: text };
 
   return { kind: "binary", value: bytes };
 }
@@ -125,37 +119,21 @@ function tryDecodeBytes(bytes: Uint8Array, depth: number, ctx: DecodeContext): u
   try {
     const decoded = cborDecode(bytes);
     if (isAcceptableCborResult(decoded)) {
-      ctx.bytesDecodedCount++;
       const inner = deepDecodeValue(decoded, depth + 1, ctx);
       return new DecodedBytes("cbor", bytes.length, inner);
     }
   } catch { /* fall through */ }
 
-  try {
-    const text = utf8Strict.decode(bytes);
-    const first = text.trimStart()[0];
-    if (first && '{["-0123456789tfn'.includes(first)) {
-      const parsed = JSON.parse(text);
-      ctx.bytesDecodedCount++;
-      const inner = deepDecodeValue(parsed, depth + 1, ctx);
-      return new DecodedBytes("json", bytes.length, inner);
-    }
-  } catch { /* fall through */ }
+  const json = tryParseJson(bytes);
+  if (json !== undefined) {
+    const inner = deepDecodeValue(json, depth + 1, ctx);
+    return new DecodedBytes("json", bytes.length, inner);
+  }
 
-  try {
-    if (bytes.length >= 2) {
-      const text = utf8Strict.decode(bytes);
-      let printable = 0;
-      for (const ch of text) {
-        const c = ch.codePointAt(0)!;
-        if (c >= 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) printable++;
-      }
-      if (printable / [...text].length >= 0.9) {
-        ctx.bytesDecodedCount++;
-        return new DecodedBytes("text", bytes.length, text);
-      }
-    }
-  } catch { /* fall through */ }
+  if (bytes.length >= 2) {
+    const text = tryDecodePrintableText(bytes);
+    if (text !== null) return new DecodedBytes("text", bytes.length, text);
+  }
 
   return bytes;
 }
@@ -166,7 +144,7 @@ function isAcceptableCborResult(v: unknown): boolean {
   return v !== null && typeof v === "object" && !(v instanceof Uint8Array);
 }
 
-function isByteIntArray(arr: unknown[]): boolean {
+export function isByteIntArray(arr: unknown[]): boolean {
   return arr.every((b) => typeof b === "number" && b >= 0 && b <= 255);
 }
 
@@ -222,7 +200,7 @@ function annotateContainerMeta(meta: unknown): unknown {
   if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return meta;
   const out: Record<string, unknown> = { ...(meta as Record<string, unknown>) };
   const sig = out["signature"];
-  if (Array.isArray(sig) && sig.length === 64 && sig.every((b) => typeof b === "number" && b >= 0 && b <= 255)) {
+  if (Array.isArray(sig) && sig.length === 64 && isByteIntArray(sig)) {
     out["signature"] = Uint8Array.from(sig as number[]);
   }
   const version = out["version"];

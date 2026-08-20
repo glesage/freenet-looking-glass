@@ -2,7 +2,7 @@
 // segments) so links survive the Freenet gateway and static dev servers — same
 // pattern as River's ?room= deep links.
 
-export const FOCUS_PARAM = "focus";
+const FOCUS_PARAM = "focus";
 
 function queryPairs(search: string): Array<[string, string]> {
   return search

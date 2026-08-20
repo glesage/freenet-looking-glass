@@ -37,12 +37,6 @@ export function renderRoot(value: unknown): HTMLElement {
     return container;
   }
 
-  if (unwrapped instanceof Uint8Array && !(value instanceof DecodedBytes)) {
-    container.appendChild(renderScalar(unwrapped));
-    if (suffix) container.appendChild(el("span", "val-muted decoded-suffix", suffix));
-    return container;
-  }
-
   if (typeof unwrapped !== "object" || unwrapped instanceof Uint8Array) {
     container.appendChild(renderScalar(unwrapped));
     if (suffix) container.appendChild(el("span", "val-muted decoded-suffix", suffix));
@@ -93,7 +87,7 @@ function renderEntry(key: string, value: unknown, depth: number): HTMLElement {
     if (details.open) {
       if (!rendered) {
         rendered = true;
-        details.appendChild(renderChildren(key, inner, depth));
+        details.appendChild(renderChildren(inner, depth));
       }
       return;
     }
@@ -106,7 +100,7 @@ function renderEntry(key: string, value: unknown, depth: number): HTMLElement {
   return details;
 }
 
-function renderChildren(_key: string, value: unknown, depth: number): HTMLElement {
+function renderChildren(value: unknown, depth: number): HTMLElement {
   const inner = unwrapDecodedBytes(value);
 
   if (Array.isArray(inner)) {
