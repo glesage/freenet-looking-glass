@@ -596,3 +596,51 @@ button.subscribed {
 .scroll-top-btn[hidden] {
   display: none;
 }
+
+.diff-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-light);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.diff-toggle:hover {
+  color: var(--accent-primary);
+}
+
+.diff-detail td {
+  padding: 0.5rem 0.75rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  background: var(--bg-tertiary);
+  border-top: none;
+}
+
+.diff-line {
+  padding: 0.1rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-path {
+  color: var(--text-muted);
+}
+
+.diff-added {
+  color: var(--success);
+}
+
+.diff-removed {
+  color: var(--error);
+}
+
+.diff-changed {
+  color: var(--warning);
+}

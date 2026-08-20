@@ -58,31 +58,6 @@ export function renderValue(value: unknown, depth = 0): HTMLElement {
   return renderScalar(unwrapDecodedBytes(value));
 }
 
-export function renderRowsTable(
-  rows: Array<Record<string, string>>,
-  columns: string[],
-): HTMLElement {
-  const tableWrap = el("div", "table-scroll");
-  const table = el("table", "data-table");
-  const thead = el("thead");
-  const headRow = el("tr");
-  for (const col of columns) headRow.appendChild(el("th", undefined, col));
-  thead.appendChild(headRow);
-  table.appendChild(thead);
-
-  const tbody = el("tbody");
-  for (const row of rows) {
-    const tr = el("tr");
-    for (const col of columns) {
-      tr.appendChild(el("td", undefined, row[col] ?? "—"));
-    }
-    tbody.appendChild(tr);
-  }
-  table.appendChild(tbody);
-  tableWrap.appendChild(table);
-  return tableWrap;
-}
-
 function renderEntry(key: string, value: unknown, depth: number): HTMLElement {
   if (depth > MAX_RENDER_DEPTH) return el("div", "tree-entry", "…");
 

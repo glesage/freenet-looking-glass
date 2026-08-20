@@ -2,12 +2,16 @@ import "./style.css";
 import { summaryFromDecoded } from "./contract-summary";
 import { NodeClient, type ContractEntry, type ContractListing, type UpdateEvent } from "./freenet";
 import { deepDecode, type DeepDecoded } from "./decoders";
-import { el, renderRoot, renderRowsTable } from "./ui/render";
+import { diffDecoded, type DiffEntry } from "./state-diff";
+import { el, renderRoot } from "./ui/render";
+import { renderUpdateLog } from "./ui/update-log";
 import { formatBytes } from "./ui/format-bytes";
 import { attachCombobox, type KeyComboEntry } from "./ui/combobox";
 import { loadJson, saveJson, storageIsPersistent } from "./storage";
 import { sha256Hex } from "./sha256";
 import { readInspectedKey, writeInspectedKey } from "./url";
+
+type LoggedUpdate = UpdateEvent & { diff?: DiffEntry[] };
 
 interface Inspection {
   keyId: string;
@@ -17,7 +21,7 @@ interface Inspection {
   subscribed: boolean;
   subscribePending: boolean;
   deep: DeepDecoded | null;
-  updates: UpdateEvent[];
+  updates: LoggedUpdate[];
   error?: string;
 }
 
@@ -159,15 +163,22 @@ client.onSubscribeResult((keyId, ok) => {
 client.onUpdate((update) => {
   const insp = inspections.get(update.keyId);
   if (!insp?.subscribed) return;
-  insp.updates.push(update);
-  if (insp.updates.length > MAX_UPDATES_KEPT) {
-    insp.updates.splice(0, insp.updates.length - MAX_UPDATES_KEPT);
-  }
   if (update.kind !== "delta") {
+    const newDeep = deepDecode(update.bytes);
+    const diff = insp.deep ? diffDecoded(insp.deep.value, newDeep.value) : undefined;
+    insp.updates.push({ ...update, diff });
+    if (insp.updates.length > MAX_UPDATES_KEPT) {
+      insp.updates.splice(0, insp.updates.length - MAX_UPDATES_KEPT);
+    }
     insp.bytes = update.bytes;
     insp.sha = sha256Hex(update.bytes);
     insp.fetchedAt = update.receivedAt;
-    insp.deep = deepDecode(update.bytes);
+    insp.deep = newDeep;
+  } else {
+    insp.updates.push(update);
+    if (insp.updates.length > MAX_UPDATES_KEPT) {
+      insp.updates.splice(0, insp.updates.length - MAX_UPDATES_KEPT);
+    }
   }
   if (update.keyId === currentKey) renderPanel();
 });
@@ -474,8 +485,9 @@ function renderPanel(): void {
         kind: u.kind,
         size: formatBytes(u.bytes.length),
         sha256: `${sha256Hex(u.bytes).slice(0, 16)}…`,
+        diff: u.diff,
       }));
-    activity.appendChild(renderRowsTable(rows, ["time", "kind", "size", "sha256"]));
+    activity.appendChild(renderUpdateLog(rows));
   }
   panel.appendChild(activity);
 }
