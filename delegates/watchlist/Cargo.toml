@@ -1,0 +1,14 @@
+[package]
+name = "looking-glass-watchlist-delegate"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["freenet-main-delegate"]
+freenet-main-delegate = []
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+freenet-stdlib = { version = "0.8.5", features = ["contract"] }

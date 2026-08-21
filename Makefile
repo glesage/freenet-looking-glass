@@ -6,11 +6,23 @@ WEB_DIR := web
 DIST := $(WEB_DIR)/dist
 SITE_KEY := freenet-looking-glass
 NODE_HOST ?= 127.0.0.1:7509
+DELEGATE_WASM := target/wasm32-unknown-unknown/release/looking_glass_watchlist_delegate.wasm
+DELEGATE_DEST := $(WEB_DIR)/src/delegate/watchlist_delegate.wasm
 
-.PHONY: build dev test publish update liveness clean
+.PHONY: build dev test publish update liveness clean delegate check-delegate
 
 build:
 	cd $(WEB_DIR) && npm install && npm run build
+
+delegate:
+	cargo build --release --target wasm32-unknown-unknown \
+	    -p looking-glass-watchlist-delegate
+	cp $(DELEGATE_WASM) $(DELEGATE_DEST)
+
+check-delegate: delegate
+	@git diff --quiet -- $(DELEGATE_DEST) || { \
+	  echo "ERROR: $(DELEGATE_DEST) is stale — run 'make delegate' and commit."; \
+	  exit 1; }
 
 dev:
 	cd $(WEB_DIR) && npm run dev

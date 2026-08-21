@@ -1,9 +1,22 @@
 // Live-node tier: drives Looking Glass against a running Freenet node
 // (default ws-api 127.0.0.1:7509). Requires a node — no skip path.
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 const DEV_URL = process.env.UI_DEV_URL ?? "http://127.0.0.1:5173/";
 const NODE_HOST = process.env.FREENET_NODE_HOST ?? "127.0.0.1:7509";
+// Watchlist writes are debounced 300 ms in WatchlistDelegate (SET_DEBOUNCE_MS).
+const WATCHLIST_FLUSH_MS = 400;
+
+async function expectWatchlistPersisted(
+  page: Page,
+  pinnedRow: Locator,
+  expectedCount: number,
+): Promise<void> {
+  await page.waitForTimeout(WATCHLIST_FLUSH_MS);
+  await page.reload();
+  await expect(page.locator(".status-pill")).toHaveText(/connected/);
+  await expect(pinnedRow).toHaveCount(expectedCount, { timeout: 15_000 });
+}
 
 async function nodeIsReachable(): Promise<boolean> {
   try {
@@ -102,10 +115,22 @@ test("inspects a contract from the local node end to end", async ({ page }) => {
 
   await expect(page).toHaveURL(/[?&]focus=/);
 
-  await page.getByRole("button", { name: "Pin" }).click();
-  await expect(page.locator(".watchlist li")).toHaveCount(1);
-  await page.getByRole("button", { name: "Unpin" }).click();
-  await expect(page.locator(".watchlist li")).toHaveCount(0);
+  const toolbarPin = page.locator(".panel-toolbar").getByRole("button", { name: /^(Pin|Unpin)$/ });
+  const pinnedRow = page.locator(".watchlist li").filter({
+    has: page.locator(`button[title="${firstKey}"]`),
+  });
+  if ((await toolbarPin.textContent())?.trim() === "Unpin") {
+    await toolbarPin.click();
+    await expect(pinnedRow).toHaveCount(0);
+    await page.waitForTimeout(WATCHLIST_FLUSH_MS);
+  }
+  await toolbarPin.click();
+  await expect(pinnedRow).toHaveCount(1);
+  await expectWatchlistPersisted(page, pinnedRow, 1);
+
+  await page.locator(".panel-toolbar").getByRole("button", { name: "Unpin" }).click();
+  await expect(pinnedRow).toHaveCount(0);
+  await expectWatchlistPersisted(page, pinnedRow, 0);
 
   await page.getByRole("button", { name: "Watch" }).click();
   await expect(page.getByRole("button", { name: "Watching" })).toBeVisible({ timeout: 30_000 });

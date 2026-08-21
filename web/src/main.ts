@@ -7,7 +7,16 @@ import { el, renderRoot } from "./ui/render";
 import { renderUpdateLog } from "./ui/update-log";
 import { formatBytes } from "./ui/format-bytes";
 import { attachCombobox, type KeyComboEntry } from "./ui/combobox";
-import { loadJson, saveJson, storageIsPersistent } from "./storage";
+import { WatchlistDelegate } from "./delegate/client";
+import { loadJson, saveJson } from "./storage";
+import {
+  addPin,
+  importLegacyWatchlist,
+  isPinned,
+  removePin,
+  shortKey,
+  type WatchlistEntry,
+} from "./watchlist";
 import { sha256Hex } from "./sha256";
 import { readInspectedKey, writeInspectedKey } from "./url";
 
@@ -27,19 +36,14 @@ interface Inspection {
 
 const MAX_UPDATES_KEPT = 200;
 const SUBSCRIBE_TIMEOUT_MS = 30_000;
-const WATCHLIST_KEY = "looking-glass.watchlist.v2";
-const WATCHLIST_KEY_V1 = "looking-glass.watchlist.v1";
 const SUMMARY_CACHE_KEY = "looking-glass.combo-summaries.v1";
 const CONTRACT_CACHE_TTL_MS = 30_000;
 
-interface WatchlistEntry {
-  keyId: string;
-  name: string;
-}
-
 const client = new NodeClient();
+const watchlistStore = new WatchlistDelegate(client);
 const inspections = new Map<string, Inspection>();
-let watchlist: WatchlistEntry[] = loadWatchlist();
+let watchlist: WatchlistEntry[] = [];
+let delegateReady = false;
 let currentKey: string | null = null;
 let connStatus = "connecting";
 let connDetail = "";
@@ -130,12 +134,12 @@ client.onStatus((s, detail) => {
   connDetail = detail ?? "";
   renderStatus();
   if (s === "connected") {
-    void startSummaryPrefetch();
     if (pendingBootKey) {
       const key = pendingBootKey;
       pendingBootKey = null;
       void inspect(key);
     }
+    void bootWatchlistAndPrefetch();
     if (connectedBefore) {
       for (const insp of inspections.values()) {
         if (insp.subscribed) void beginSubscribe(insp);
@@ -275,29 +279,37 @@ async function beginSubscribe(insp: Inspection): Promise<void> {
 }
 
 function togglePin(keyId: string): void {
-  if (isPinned(keyId)) {
-    watchlist = watchlist.filter((e) => e.keyId !== keyId);
+  if (isPinned(watchlist, keyId)) {
+    watchlist = removePin(watchlist, keyId);
   } else {
     const suggested = suggestWatchlistName(keyId);
     const entered = window.prompt("Name this pinned contract:", suggested);
     if (entered === null) return;
     const name = entered.trim() || suggested;
-    watchlist = [...watchlist, { keyId, name }];
+    watchlist = addPin(watchlist, { keyId, name });
   }
-  saveJson(WATCHLIST_KEY, watchlist);
+  watchlistStore.set(watchlist);
   renderSidebar();
   renderPanel();
 }
 
-function isPinned(keyId: string): boolean {
-  return watchlist.some((e) => e.keyId === keyId);
-}
-
-function loadWatchlist(): WatchlistEntry[] {
-  const v2 = loadJson<WatchlistEntry[]>(WATCHLIST_KEY, []);
-  if (v2.length > 0) return v2.filter((e) => e.keyId && e.name);
-  const v1 = loadJson<string[]>(WATCHLIST_KEY_V1, []);
-  return v1.map((keyId) => ({ keyId, name: shortKey(keyId) }));
+async function bootWatchlistAndPrefetch(): Promise<void> {
+  const stored = await watchlistStore.init();
+  delegateReady = stored !== undefined;
+  if (stored !== undefined) {
+    if (stored === null) {
+      const legacy = importLegacyWatchlist();
+      if (legacy.length) {
+        watchlist = legacy;
+        watchlistStore.set(legacy);
+      }
+    } else {
+      watchlist = stored;
+    }
+    renderSidebar();
+    renderPanel();
+  }
+  void startSummaryPrefetch();
 }
 
 function suggestWatchlistName(keyId: string): string {
@@ -423,9 +435,9 @@ function renderSidebar(): void {
 
   const watchHead = el("h2", undefined, "Watchlist");
   sidebar.appendChild(watchHead);
-  if (!storageIsPersistent) {
+  if (!delegateReady) {
     sidebar.appendChild(
-      el("p", "muted small", "(storage unavailable in this sandbox — watchlist lives for this tab only)"),
+      el("p", "muted small", "(node delegate unavailable — watchlist lives for this tab only)"),
     );
   }
   if (watchlist.length === 0) {
@@ -471,7 +483,7 @@ function renderPanel(): void {
 
   const toolbar = el("div", "panel-toolbar");
   toolbar.appendChild(el("span", "state-size", formatBytes(insp.bytes.length)));
-  toolbar.appendChild(createPinButton(insp.keyId, isPinned(insp.keyId)));
+  toolbar.appendChild(createPinButton(insp.keyId, isPinned(watchlist, insp.keyId)));
   panel.appendChild(toolbar);
 
   panel.appendChild(renderState(insp));
@@ -518,8 +530,4 @@ function createPinButton(keyId: string, pinned: boolean): HTMLButtonElement {
   btn.type = "button";
   btn.addEventListener("click", () => togglePin(keyId));
   return btn;
-}
-
-function shortKey(keyId: string): string {
-  return keyId.length > 20 ? `${keyId.slice(0, 10)}…${keyId.slice(-6)}` : keyId;
 }

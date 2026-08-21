@@ -34,3 +34,11 @@ jobs:
       - name: Unit tests
         working-directory: web
         run: npm run test:unit
+
+  delegate-wasm:
+    name: Delegate WASM matches source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-unknown-unknown
+      - run: make check-delegate
