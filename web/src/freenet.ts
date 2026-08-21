@@ -8,6 +8,7 @@ import {
   FreenetWsApi,
   GetRequest,
   UpdateDataType,
+  type DelegateResponse,
   type GetResponse,
   type HostError,
   type ResponseHandler,
@@ -56,6 +57,7 @@ export class NodeClient {
   private statusCbs: Array<(s: ConnStatus, detail?: string) => void> = [];
   private updateCbs: Array<(u: UpdateEvent) => void> = [];
   private subscribeResultCbs: Array<(keyId: string, ok: boolean) => void> = [];
+  private delegateCbs: Array<(r: DelegateResponse) => void> = [];
   private status: ConnStatus = "disconnected";
 
   connect(): void {
@@ -80,7 +82,9 @@ export class NodeClient {
       onContractPut: () => {},
       onContractUpdate: () => {},
       onContractNotFound: () => {},
-      onDelegateResponse: () => {},
+      onDelegateResponse: (response) => {
+        for (const cb of this.delegateCbs) cb(response);
+      },
       onContractUpdateNotification: (n: UpdateNotification) => {
         const ev = notificationToEvent(n);
         if (ev) for (const cb of this.updateCbs) cb(ev);
@@ -138,6 +142,15 @@ export class NodeClient {
 
   onSubscribeResult(cb: (keyId: string, ok: boolean) => void): void {
     this.subscribeResultCbs.push(cb);
+  }
+
+  onDelegateResponse(cb: (r: DelegateResponse) => void): void {
+    this.delegateCbs.push(cb);
+  }
+
+  // Unstable across @freenetorg/freenet-stdlib bumps — see dapp-builder ui-patterns.md.
+  sendDelegateRequest(req: unknown): void {
+    (this.requireApi() as unknown as { sendRequest(r: unknown): void }).sendRequest(req);
   }
 
   private requireApi(): FreenetWsApi {

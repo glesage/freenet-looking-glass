@@ -22,3 +22,9 @@ The contract search functionality does NOT work in production, it only works as 
 <img width="472" height="248" alt="Screenshot 2026-08-21 at 12 00 30 am" src="https://github.com/user-attachments/assets/18dd2ce5-b341-4c70-bd02-bab12fa925d9" />  
 
 Finding contract keys is a bit tough when there are dedicated contracts within an app. In order to find you'll have to either click every contract one at a time in the search list, or ask AI (:
+
+## Watchlist storage
+
+Pinned contracts are stored in a Freenet **delegate** on your local node. `make dev` and the published hosted app use **separate** watchlists because the delegate namespaces secrets by web-app origin.
+
+Rebuilding or upgrading the watchlist delegate WASM changes its `code_hash` and therefore its `delegate_key`, which starts a fresh secret namespace. Previously stored pins are not migrated automatically; rebuild the list or keep the committed WASM stable until you are ready to re-pin.
